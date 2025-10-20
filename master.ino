@@ -122,7 +122,8 @@ int distance = 0;
 
 enum OpModes { PUSH_PULL,
                 OBSTACLE_AVOIDANCE,
-                REMOTE}
+                REMOTE,
+                TUNING};
 
 OpModes op_mode = REMOTE;
 
@@ -613,23 +614,26 @@ uint32_t Wheel(byte WheelPos) {  //used to adjust values around the color wheel
 }
 #pragma endregion LEDs
 
-/***** SENSOR HELPERS ****/
-#pragma region Sensors
-/**
- * @brief checks for new IR commands and sets balance and control states accordingly
- * Can be used for remote control driving, as well as wireless PID tuning or changing LEDs
- * Great place to play around and add things
-*/
-void checkIRCommands() {
-  if (IrReceiver.decode()) {
-    //printControlData(); // prints various control variables to serial monitor
+bool checkForModeChange(){
+  OpModes oldOpMode = op_mode;
+  switch (IrReceiver.decodedIRData.command) {
+    case cmd1: //decreases the I value for PID
+      op_mode = REMOTE;
+      break;
+    case cmd2: //decreases the I value for PID
+      op_mode = PUSH_PULL;
+      break;
+    case cmd3: //decreases the I value for PID
+      op_mode = OBSTACLE_AVOIDANCE;
+      break;
+    case cmd0: //decreases the I value for PID
+      op_mode = TUNING;
+      break;
+  }
+  return (oldOpMode != op_mode);
+}
 
-    /*
-         * !!!Important!!! Enable receiving of the next value,
-         * since receiving has stopped after the end of the current received data packet.
-         */
-    IrReceiver.resume();  // Enable receiving of the next value
-
+void processIR_REMOTE(){
     switch (IrReceiver.decodedIRData.command) {  //this is where the commands are executed
 
       case upCmd:
@@ -683,7 +687,17 @@ void checkIRCommands() {
         cmd_state = CENTER;
         break;
 
-      case cmd7: //increases the P value for PID
+      default: //default to flushing the IMU reading in case we got noise
+        if (IMUdataReady == 1) {  // default to just check if the interrupt is triggered from the MPU to clear the buffer.
+          readAngles();
+        }
+        break;
+    }
+}
+
+void processIR_TUNING(){
+  switch (IrReceiver.decodedIRData.command) {
+        case cmd7: //increases the P value for PID
         kP = kP + 0.25;
         pid.SetTunings(kP, kI, kD);
         break;
@@ -718,7 +732,34 @@ void checkIRCommands() {
           readAngles();
         }
         break;
+      }
+}
+
+/***** SENSOR HELPERS ****/
+#pragma region Sensors
+/**
+ * @brief checks for new IR commands and sets balance and control states accordingly
+ * Can be used for remote control driving, as well as wireless PID tuning or changing LEDs
+ * Great place to play around and add things
+*/
+void checkIRCommands() {
+  if (IrReceiver.decode()) {
+    //printControlData(); // prints various control variables to serial monitor
+
+    /*
+         * !!!Important!!! Enable receiving of the next value,
+         * since receiving has stopped after the end of the current received data packet.
+         */
+    IrReceiver.resume();  // Enable receiving of the next value
+
+    if (!checkForModeChange()){
+      if (op_mode == REMOTE){
+        processIR_REMOTE();
+      }else if (op_mode == TUNING){
+        processIR_TUNING();
+      }
     }
+    
   }
 }
 
